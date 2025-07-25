@@ -1,4 +1,5 @@
 import os
+from google.genai import types
 
 def get_file_content(working_directory, file_path):
     try:
@@ -16,7 +17,21 @@ def get_file_content(working_directory, file_path):
             file_content_string += f'[...File "{file_path}" truncated at 10000 characters]'
         return file_content_string
     except Exception as e:
-        print(f"Error encountered: {e}")
+        return f"Error encountered: {e}"
+
+schema_get_file_content = types.FunctionDeclaration(
+    name="get_file_content",
+    description="Get the content of files in the specified file, constrained to the working directory.",
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "file_path": types.Schema(
+                type=types.Type.STRING,
+                description="The file path relative to the working directory of the file you want to know content of. It can't be empty",
+            ),
+        },
+    ),
+)
 
 def main():
     print(get_file_content("calculator", "pkg/calculator.py"))
