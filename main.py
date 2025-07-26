@@ -50,7 +50,10 @@ def main():
     if len(sys.argv) == 1:
         print("no prompt given")
         exit(1)
-    for i in range(10):
+    for i in range(20):
+        # Add a small delay between requests
+        if i > 0:
+            time.sleep(4)  # Wait 4 seconds between requests
         response = client.models.generate_content(
                 model="gemini-2.0-flash-001", 
                 contents=messages,
@@ -67,19 +70,29 @@ def main():
 
 
         if response.function_calls:
+            # Collect ALL function call responses first
+            function_response_parts = []
+
             for function_call_part in response.function_calls:
                 if "--verbose" in sys.argv:
                     result_function_call = call_function(function_call_part, verbose=True)
                 else:
                     result_function_call = call_function(function_call_part)
+
                 if not result_function_call.parts:
                     raise Exception("Error: no parts found to the function call")
                 if not result_function_call.parts[0].function_response:
                     raise Exception("Error: no response found")
                 if not result_function_call.parts[0].function_response.response:
                     raise Exception("Error: no results found")
-                messages.append(result_function_call)
+
+                # Add the function response part to our collection
+                function_response_parts.extend(result_function_call.parts)
+
+            # Now send ALL function responses in a single message
+            messages.append(types.Content(role="tool", parts=function_response_parts))
             continue
+
         if response.text:
             print(response.text)
             if response.usage_metadata:
@@ -94,7 +107,6 @@ def main():
             print("Response tokens:", response.usage_metadata.candidates_token_count)
         else:
             print("No usage metadata available")
-        time.sleep(10)
 
 
 def call_function(function_call_part, verbose=False):
