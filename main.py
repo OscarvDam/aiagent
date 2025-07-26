@@ -1,12 +1,13 @@
 import sys
+import time
 import os
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from functions.get_files_info import schema_get_files_info
-from functions.get_file_content import schema_get_file_content
-from functions.write_file import schema_write_file
-from functions.run_python import schema_run_python_file
+from functions.get_files_info import schema_get_files_info, get_files_info
+from functions.get_file_content import schema_get_file_content, get_file_content
+from functions.write_file import schema_write_file, write_file
+from functions.run_python import schema_run_python_file, run_python_file
 
 system_prompt = """
 You are a helpful AI coding agent.
@@ -49,27 +50,51 @@ def main():
     if len(sys.argv) == 1:
         print("no prompt given")
         exit(1)
+    for i in range(10):
+        response = client.models.generate_content(
+                model="gemini-2.0-flash-001", 
+                contents=messages,
+                config=types.GenerateContentConfig(
+                    tools=[available_functions], system_instruction=system_prompt
+                )
+        )
+        try:
+            if response.candidates:
+                for candidate in response.candidates:
+                    messages.append(candidate.content)
+        except Exception as e:
+            print(f"No candidate found {e}")
 
-    response = client.models.generate_content(
-            model="gemini-2.0-flash-001", 
-            contents=messages,
-            config=types.GenerateContentConfig(
-                tools=[available_functions], system_instruction=system_prompt
-            )
-    )
-    
 
-    if response.function_calls:
-        for function_call_part in response.function_calls:
-            print(f"Calling function: {function_call_part.name}({function_call_part.args})")
-    else:
-        print(response.text)
-
-    if response.usage_metadata:
-        print("Prompt tokens:", response.usage_metadata.prompt_token_count)
-        print("Response tokens:", response.usage_metadata.candidates_token_count)
-    else:
-        print("No usage metadata available")
+        if response.function_calls:
+            for function_call_part in response.function_calls:
+                if "--verbose" in sys.argv:
+                    result_function_call = call_function(function_call_part, verbose=True)
+                else:
+                    result_function_call = call_function(function_call_part)
+                if not result_function_call.parts:
+                    raise Exception("Error: no parts found to the function call")
+                if not result_function_call.parts[0].function_response:
+                    raise Exception("Error: no response found")
+                if not result_function_call.parts[0].function_response.response:
+                    raise Exception("Error: no results found")
+                messages.append(result_function_call)
+            continue
+        if response.text:
+            print(response.text)
+            if response.usage_metadata:
+                print("Prompt tokens:", response.usage_metadata.prompt_token_count)
+                print("Response tokens:", response.usage_metadata.candidates_token_count)
+            else:
+                print("No usage metadata available")
+            break
+        
+        if response.usage_metadata:
+            print("Prompt tokens:", response.usage_metadata.prompt_token_count)
+            print("Response tokens:", response.usage_metadata.candidates_token_count)
+        else:
+            print("No usage metadata available")
+        time.sleep(10)
 
 
 def call_function(function_call_part, verbose=False):
@@ -77,6 +102,35 @@ def call_function(function_call_part, verbose=False):
         print(f"Calling function: {function_call_part.name}({function_call_part.args})")
     else:
         print(f" - Calling function: {function_call_part.name}")
+    match function_call_part.name:
+        case "get_files_info":
+            function_result = get_files_info("./calculator", **function_call_part.args)
+        case "get_file_content":
+            function_result = get_file_content("./calculator", **function_call_part.args)
+        case "write_file":
+            function_result = write_file("./calculator", **function_call_part.args)
+        case "run_python_file":
+            function_result = run_python_file("./calculator", **function_call_part.args)
+        case _:
+            return types.Content(
+                role="tool",
+                parts=[
+                    types.Part.from_function_response(
+                        name=function_call_part.name,
+                        response={"error": f"Unknown function: {function_call_part.name}"},
+                    )
+                ],
+            )
+    return types.Content(
+            role="tool",
+            parts=[
+                types.Part.from_function_response(
+                    name=function_call_part.name,
+                    response={"result": function_result},
+                )
+            ],
+    )
+        
 
 if __name__ == "__main__":
     main()
